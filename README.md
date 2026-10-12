@@ -43,12 +43,15 @@ The pack targets Minecraft Bedrock **1.21.100+** and uses the stable
 
 ```
 /upenchant <enchantment> <level>
+/upenchant all <level>
 ```
 
 - Run it while holding the item in your main hand (weapons, tools, bows), or
   while wearing the relevant armour piece (armour enchantments). For armour the
   pack uses the worn piece that already has UpEnchant data, otherwise the first
   enchantable armour slot.
+- `all` is a bulk shortcut: it puts every weapon/tool/bow enchantment on the held
+  item and every armour enchantment on each worn piece, in one command.
 - The enchantment name is autocompleted. Level range is `1` to `100`.
 - Levels at or below the vanilla cap behave exactly like vanilla.
 - For a level above the cap, the pack first asks the engine to store the exact
@@ -67,16 +70,23 @@ The pack targets Minecraft Bedrock **1.21.100+** and uses the stable
 | Fire Aspect | Longer burn time |
 | Knockback | Stronger knockback |
 | Looting | Extra mob drops |
+| Efficiency | `haste` while the tool is held |
 | Power (bow) | Bonus arrow damage |
+| Punch (bow) | Stronger arrow knockback |
 | Flame (bow) | Longer burn time |
 | Fortune | Extra block drops |
 | Unbreaking | Chance to skip durability loss |
 | Protection / Projectile / Fire / Blast / Feather Falling | Damage reduction vs the matching source |
 | Thorns | Reflect damage |
-| Respiration | Water breathing |
+| Respiration | Water breathing while worn |
+| Depth Strider | `dolphins_grace` while worn |
+| Soul Speed | `speed` while worn and standing on soul sand/soil |
+| Aqua Affinity | `haste` while worn and underwater |
+| Swift Sneak | `speed` while worn and sneaking (approximation) |
 
 `Mending`, `Infinity` and `Silk Touch` are single-level enchantments with no
-meaningful beyond-max effect, so they are applied at level 1 only.
+meaningful beyond-max effect, so requesting them above level 1 is refused rather
+than recorded as a level that does nothing.
 
 ## Files
 

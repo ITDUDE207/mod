@@ -49,6 +49,10 @@ const ENCHANTS = {
   feather_falling: { max: 4, group: "armor" },
   thorns: { max: 3, group: "armor" },
   respiration: { max: 3, group: "armor" },
+  depth_strider: { max: 3, group: "armor" },
+  soul_speed: { max: 3, group: "armor" },
+  aqua_affinity: { max: 1, group: "armor" },
+  swift_sneak: { max: 3, group: "armor" },
   power: { max: 5, group: "bow" },
   punch: { max: 2, group: "bow" },
   flame: { max: 1, group: "bow" },
@@ -57,10 +61,15 @@ const ENCHANTS = {
   silk_touch: { max: 1, group: "special" },
 };
 
+// "special" enchantments only exist at level 1 and have no scripted effect, so a
+// request above their cap is refused instead of recorded as a phantom level.
+const isSimulated = (def) => def.group !== "special";
+
+// Every enchantment that /upenchant can target, plus "all" for the bulk command.
+const COMMAND_ENCHANTS = ["all", ...Object.keys(ENCHANTS)];
+
 const HARD_MAX = 100;
 const ENCHANT_DP = "upenchant:data";
-
-const ENCHANT_KEYS = Object.keys(ENCHANTS).filter((k) => ENCHANTS[k].group !== "special");
 
 const ARMOR_SLOTS = [EquipmentSlot.Head, EquipmentSlot.Chest, EquipmentSlot.Legs, EquipmentSlot.Feet];
 
@@ -145,6 +154,25 @@ function sumArmorExtra(player, enchantKey) {
   return total;
 }
 
+// Simulated extra for a piece in any slot (used for aqua affinity on a helmet,
+// which the player may be holding rather than wearing).
+function anySlotExtra(player, enchantKey) {
+  const equippable = player.getComponent(EntityComponentTypes.Equippable);
+  if (!equippable) return 0;
+  const max = ENCHANTS[enchantKey].max;
+  let total = 0;
+  for (const slot of Object.values(EquipmentSlot)) {
+    try {
+      const item = equippable.getEquipment(slot);
+      if (!item) continue;
+      total += simExtra(readData(item), enchantKey, max);
+    } catch (e) {
+      /* some slots (e.g. Body) are not supported on every entity */
+    }
+  }
+  return total;
+}
+
 function hasFamily(entity, family) {
   try {
     const component = entity.getComponent(EntityComponentTypes.TypeFamily);
@@ -179,19 +207,10 @@ function resolveTarget(player, def) {
   return item ? { equippable, slot, item } : null;
 }
 
-function applyEnchant(player, enchantKey, level) {
+function applyToTarget(target, enchantKey, level) {
   const def = ENCHANTS[enchantKey];
-  if (!def) return { ok: false, message: `Unknown enchantment: ${enchantKey}` };
-
-  const target = resolveTarget(player, def);
-  if (!target) {
-    return {
-      ok: false,
-      message:
-        def.group === "armor"
-          ? "Wear a piece of armour in the matching slot first."
-          : "Hold the item you want to enchant in your main hand.",
-    };
+  if (!isSimulated(def) && level > def.max) {
+    return { ok: false, message: `${prettify(enchantKey)} only exists at level ${def.max} (nothing to simulate).` };
   }
 
   const { equippable, slot, item } = target;
@@ -239,6 +258,71 @@ function applyEnchant(player, enchantKey, level) {
   return { ok: true, storedLevel, native, simulated: level > storedLevel };
 }
 
+function applyEnchant(player, enchantKey, level) {
+  const def = ENCHANTS[enchantKey];
+  if (!def) return { ok: false, message: `Unknown enchantment: ${enchantKey}` };
+
+  const target = resolveTarget(player, def);
+  if (!target) {
+    return {
+      ok: false,
+      message:
+        def.group === "armor"
+          ? "Wear a piece of armour in the matching slot first."
+          : "Hold the item you want to enchant in your main hand.",
+    };
+  }
+  return applyToTarget(target, enchantKey, level);
+}
+
+// Bulk command: weapon/tool/bow enchantments go on the held item, armour
+// enchantments on every worn piece. Enchantments that fit nowhere are reported.
+function applyAll(player, level) {
+  const equippable = player.getComponent(EntityComponentTypes.Equippable);
+  if (!equippable) return { ok: false, message: "You have no equipment to enchant." };
+
+  const applied = new Set();
+  const errors = new Map();
+  let simulated = false;
+
+  const run = (slot, key) => {
+    const item = equippable.getEquipment(slot);
+    if (!item || !getEnchantable(item)) return;
+    const result = applyToTarget({ equippable, slot, item }, key, level);
+    if (result.ok) {
+      applied.add(key);
+      errors.delete(key);
+      simulated = simulated || result.simulated;
+    } else if (!applied.has(key)) {
+      errors.set(key, result.message);
+    }
+  };
+
+  const held = equippable.getEquipment(EquipmentSlot.Mainhand);
+  if (held && getEnchantable(held)) {
+    for (const key of Object.keys(ENCHANTS)) {
+      const group = ENCHANTS[key].group;
+      if (group === "weapon" || group === "tool" || group === "bow") run(EquipmentSlot.Mainhand, key);
+    }
+  }
+
+  for (const slot of ARMOR_SLOTS) {
+    for (const key of Object.keys(ENCHANTS)) {
+      if (ENCHANTS[key].group === "armor") run(slot, key);
+    }
+  }
+
+  if (applied.size === 0) {
+    return { ok: false, message: "Hold a weapon/tool or wear armour, then run /upenchant all <level>." };
+  }
+  return {
+    ok: true,
+    applied: [...applied],
+    failed: [...errors.entries()].map(([key, message]) => `${prettify(key)}: ${message}`),
+    simulated,
+  };
+}
+
 /* =====================================================================
    Scripted effects
    ===================================================================== */
@@ -267,6 +351,23 @@ world.afterEvents.entityHitEntity.subscribe((event) => {
   });
 });
 
+/* --- Shared: push a victim away from a source --------------------- */
+
+function knockAway(source, victim, force, vertical) {
+  try {
+    const view = source.getViewDirection();
+    const horizontal = Math.hypot(view.x, view.z) || 1;
+    const dir = { x: view.x / horizontal, z: view.z / horizontal };
+    try {
+      victim.applyKnockback({ x: dir.x * force, z: dir.z * force }, vertical);
+    } catch (e) {
+      victim.applyImpulse({ x: dir.x * force * 0.5, y: vertical, z: dir.z * force * 0.5 });
+    }
+  } catch (e) {
+    /* ignore */
+  }
+}
+
 /* --- Weapon: stronger knockback ------------------------------------ */
 
 world.afterEvents.entityHitEntity.subscribe((event) => {
@@ -279,16 +380,7 @@ world.afterEvents.entityHitEntity.subscribe((event) => {
       const item = getHeldItem(attacker);
       const extra = item ? simExtra(readData(item), "knockback", ENCHANTS.knockback.max) : 0;
       if (extra <= 0) return;
-
-      const view = attacker.getViewDirection();
-      const horizontal = Math.hypot(view.x, view.z) || 1;
-      const dir = { x: view.x / horizontal, z: view.z / horizontal };
-      const force = 1 + extra * 0.6;
-      try {
-        victim.applyKnockback({ x: dir.x * force, z: dir.z * force }, 0.4);
-      } catch (e) {
-        victim.applyImpulse({ x: dir.x * force * 0.5, y: 0.4, z: dir.z * force * 0.5 });
-      }
+      knockAway(attacker, victim, 1 + extra * 0.6, 0.4);
     } catch (e) {
       /* ignore */
     }
@@ -384,6 +476,8 @@ world.afterEvents.projectileHitEntity.subscribe((event) => {
       }
       const flameExtra = simExtra(data, "flame", ENCHANTS.flame.max);
       if (flameExtra > 0) victim.setOnFire(flameExtra * 5, true);
+      const punchExtra = simExtra(data, "punch", ENCHANTS.punch.max);
+      if (punchExtra > 0) knockAway(shooter, victim, 1 + punchExtra * 0.6, 0.4);
     } catch (e) {
       /* ignore */
     }
@@ -501,26 +595,61 @@ world.afterEvents.entityHurt.subscribe((event) => {
   });
 });
 
-/* --- Armour: water breathing (respiration) ------------------------- */
+/* --- Held / worn effects (respiration, efficiency, striders, ...) --- */
+
+function isOnSoulBlock(player) {
+  try {
+    const { x, y, z } = player.location;
+    const below = player.dimension.getBlock({ x: Math.floor(x), y: Math.floor(y) - 1, z: Math.floor(z) });
+    return below?.typeId === "minecraft:soul_sand" || below?.typeId === "minecraft:soul_soil";
+  } catch (e) {
+    return false;
+  }
+}
 
 system.runInterval(() => {
   for (const player of world.getAllPlayers()) {
-    const extra = sumArmorExtra(player, "respiration");
-    if (extra <= 0) continue;
     try {
-      player.addEffect("water_breathing", 60, { amplifier: extra, showParticles: false });
+      const equippable = player.getComponent(EntityComponentTypes.Equippable);
+      if (!equippable) continue;
+      const hide = { showParticles: false };
+
+      // Respiration -> water breathing while worn.
+      const resp = sumArmorExtra(player, "respiration");
+      if (resp > 0) player.addEffect("water_breathing", 40, { amplifier: resp, ...hide });
+
+      // Efficiency -> haste while a simulated-efficiency tool is held.
+      const held = equippable.getEquipment(EquipmentSlot.Mainhand);
+      const eff = held ? simExtra(readData(held), "efficiency", ENCHANTS.efficiency.max) : 0;
+      if (eff > 0) player.addEffect("haste", 40, { amplifier: eff, ...hide });
+
+      // Depth Strider -> dolphins grace while boots are worn.
+      const depth = sumArmorExtra(player, "depth_strider");
+      if (depth > 0) player.addEffect("dolphins_grace", 40, { amplifier: depth, ...hide });
+
+      // Aqua Affinity -> haste while underwater with a simulated piece equipped.
+      const aqua = anySlotExtra(player, "aqua_affinity");
+      if (aqua > 0 && player.isInWater) player.addEffect("haste", 40, { amplifier: aqua, ...hide });
+
+      // Soul Speed and Swift Sneak both map to speed; keep the strongest.
+      let speedAmp = 0;
+      const soul = sumArmorExtra(player, "soul_speed");
+      if (soul > 0 && isOnSoulBlock(player)) speedAmp = Math.max(speedAmp, soul);
+      const sneak = sumArmorExtra(player, "swift_sneak");
+      if (sneak > 0 && player.isSneaking) speedAmp = Math.max(speedAmp, sneak);
+      if (speedAmp > 0) player.addEffect("speed", 40, { amplifier: speedAmp, ...hide });
     } catch (e) {
       /* ignore */
     }
   }
-}, 40);
+}, 10);
 
 /* =====================================================================
    Command registration
    ===================================================================== */
 
 system.beforeEvents.startup.subscribe(({ customCommandRegistry }) => {
-  customCommandRegistry.registerEnum("upenchant:enchant", ENCHANT_KEYS);
+  customCommandRegistry.registerEnum("upenchant:enchant", COMMAND_ENCHANTS);
 
   customCommandRegistry.registerCommand(
     {
@@ -538,7 +667,7 @@ system.beforeEvents.startup.subscribe(({ customCommandRegistry }) => {
       if (!(player instanceof Player)) {
         return { status: CustomCommandStatus.Failure, message: "Only a player can run /upenchant." };
       }
-      if (!ENCHANTS[enchantKey]) {
+      if (enchantKey !== "all" && !ENCHANTS[enchantKey]) {
         return { status: CustomCommandStatus.Failure, message: `Unknown enchantment: ${enchantKey}` };
       }
       if (!Number.isInteger(level) || level < 1 || level > HARD_MAX) {
@@ -546,6 +675,17 @@ system.beforeEvents.startup.subscribe(({ customCommandRegistry }) => {
       }
 
       system.run(() => {
+        if (enchantKey === "all") {
+          const result = applyAll(player, level);
+          if (!result.ok) {
+            player.sendMessage(`§c[upenchant] ${result.message}`);
+            return;
+          }
+          player.sendMessage(`§a[upenchant] §fApplied ${result.applied.length} enchantments at level ${level}.`);
+          for (const failure of result.failed) player.sendMessage(`§7  skipped ${failure}`);
+          return;
+        }
+
         const result = applyEnchant(player, enchantKey, level);
         if (!result.ok) {
           player.sendMessage(`§c[upenchant] ${result.message}`);
