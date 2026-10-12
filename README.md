@@ -29,7 +29,7 @@ That is the same approach used by other "max enchantments" addons on Bedrock.
 
 ## Install
 
-1. Run `./build.sh` (or just download the built `upenchant.mcaddon`).
+1. Run `./build.ps1` (or just download the built `upenchant.mcaddon`).
 2. Open `upenchant.mcaddon` to import both packs, or copy `BP/` and `RP/`
    into your world's `behavior_packs/` and `resource_packs/` folders.
 3. Enable **UpEnchant** under Behavior Packs.
@@ -95,7 +95,7 @@ BP/manifest.json          behaviour pack manifest (script module)
 BP/scripts/main.js        the command + scripted effects
 RP/manifest.json          resource pack manifest (command text)
 RP/texts/en_US.lang       command description string
-build.sh                  zips BP/ + RP/ into upenchant.mcaddon
+build.ps1                 zips BP/ + RP/ into upenchant.mcaddon
 ```
 
 ## Notes / limitations
