@@ -1,0 +1,21 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "UpEnchant Resources",
+    "description": "Language strings for the UpEnchant custom command.",
+    "uuid": "122d4d9e-36dc-4d3e-8d14-d8e3484a3716",
+    "version": [1, 0, 0],
+    "min_engine_version": [1, 21, 100]
+  },
+  "modules": [
+    {
+      "type": "resources",
+      "uuid": "adb9da41-0f55-49d9-88f5-d81ac0d489a0",
+      "version": [1, 0, 0]
+    }
+  ],
+  "metadata": {
+    "authors": ["OpenHands"],
+    "license": "MIT"
+  }
+}
