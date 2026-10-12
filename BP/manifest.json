@@ -1,0 +1,33 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "UpEnchant",
+    "description": "Adds /upenchant to apply enchantments above their vanilla level cap.",
+    "uuid": "ad561757-61b5-45b0-a881-b94f5eb99c9c",
+    "version": [1, 0, 0],
+    "min_engine_version": [1, 21, 100]
+  },
+  "modules": [
+    {
+      "type": "script",
+      "language": "javascript",
+      "entry": "scripts/main.js",
+      "uuid": "d02871fc-201a-4b63-8826-5f1d33befc6e",
+      "version": [1, 0, 0]
+    }
+  ],
+  "dependencies": [
+    {
+      "module_name": "@minecraft/server",
+      "version": "2.1.0"
+    },
+    {
+      "uuid": "122d4d9e-36dc-4d3e-8d14-d8e3484a3716",
+      "version": [1, 0, 0]
+    }
+  ],
+  "metadata": {
+    "authors": ["OpenHands"],
+    "license": "MIT"
+  }
+}
